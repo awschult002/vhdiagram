@@ -23,10 +23,11 @@ Make it easier to stitch existing VHDL modules together. You open a design, see 
 - **R-IN-4** The editor opens with the node graph of the top-level entity.
 - **R-IN-5** Each entity's comment description header is read and shown with its node. *Open: is there a fixed header format, or just the comment block directly above `entity`?*
 - **R-IN-6** Both direct instantiation and component instantiation are read.
+- **R-IN-10** Only entities, generics, ports, component declarations, instances with their generic and port maps, and signal declarations are parsed for meaning. Everything else, such as process bodies and attributes like `clk'event`, is only tokenized so the extractor can skip over it.
 - **R-IN-7** Sources are VHDL-2008. The tokenizer handles 2008 syntax, including `/* */` comments.
 - *Open: when the tool finds VHDL it doesn't understand, should it warn and make that file read-only, or do the best it can?*
 - **R-IN-8** Only the top file's directory and the directories below it are read. Vendor and library paths are never read.
-- **R-IN-9** An entity that's instantiated but has no declaration anywhere in that tree (vendor primitives, generated IP) is shown as a greyed-out node. It can't be edited or opened.
+- **R-IN-9** An entity that's instantiated but has no declaration anywhere in that tree (vendor primitives, generated IP) is shown as a greyed-out node. It can't be edited or opened. If a `component` declaration for it exists, the node shows those ports read-only. A node shows no ports only when there's no declaration anywhere. Its whole port map is copied through byte for byte.
 
 ## Nodes and connections
 
@@ -37,7 +38,7 @@ Make it easier to stitch existing VHDL modules together. You open a design, see 
 - **R-NODE-5** Recursive nodes are supported: opening a hierarchical node shows its own internal graph. Recursive `generate` (an entity instantiating itself) is not supported.
 - **R-NODE-6** Only entities and their instances are nodes. Processes, `generate` statements and `block` statements are not shown in the editor.
 - **R-CONN-1** A connection is a signal in the generated source code.
-- **R-CONN-2** For now, a port map connects a whole port to a whole signal. Slices and conversion functions aren't supported yet; they may come later as their own node type. *Open: are record fields, constants or `open` used in port maps?*
+- **R-CONN-2** For now, a port map connects a whole port to a whole signal. Slices and conversion functions aren't supported yet; they may come later as their own node type. Until then, an association the tool can't model (a slice or a conversion function) stays on its port as locked text and is copied through byte for byte, never dropped or rewritten. *Open: are record fields, constants or `open` used in port maps?*
 - **R-NODE-7** When a port's width depends on a generic, the node shows the width expression as text and doesn't compute it.
 - **R-NODE-8** A file may hold more than one entity, and those entities are supported. *Open: is a file with several entities written back as one file, or split?*
 - **R-NODE-9** Each entity has exactly one architecture. Entities with more than one architecture aren't supported.
@@ -60,7 +61,7 @@ Make it easier to stitch existing VHDL modules together. You open a design, see 
 
 ## Testing
 
-- *Open: **R-TEST-1** needs a reference VHDL corpus for the no-change round-trip test (load, change nothing, write, diff is empty). Should it be about 30 of Alex's own files or an open-source project?*
+- *Open: **R-TEST-1** needs a reference VHDL corpus for the no-change round-trip test (load, change nothing, write, diff is empty). Should it be about 30 of Alex's own files or an open-source project?* Alex uses [hdl-modules](https://github.com/hdl-modules/hdl-modules) heavily, and its AXI and AXI-Stream modules are the inspiration for this tool, so it's the leading corpus candidate (to be confirmed).
 
 ## Scale
 
@@ -95,3 +96,6 @@ Details are in [`DESIGN.md`](DESIGN.md).
 | 2026-10-01 | A width that depends on a generic is shown as its expression text, not computed. | Alex |
 | 2026-10-01 | More than one entity per file is supported. More than one architecture per entity isn't. | Alex |
 | 2026-10-01 | Only the top directory and below are read, never vendor paths. Entities with no declaration found there become greyed-out nodes that can't be edited or opened. | Alex |
+| 2026-10-01 | Only entities, ports, generics and maps are parsed for meaning. Everything else is skipped as tokens. | Alex |
+| 2026-10-01 | An association the tool can't model, and a greyed-out node's port map, are kept as locked text and copied through byte for byte. A greyed-out node with a `component` declaration shows those ports read-only. | Team (Tester, Dev, Senior) |
+| 2026-10-01 | hdl-modules, with its AXI and AXI-Stream modules, is the inspiration for the tool. | Alex |

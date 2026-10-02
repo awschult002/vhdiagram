@@ -9,7 +9,16 @@ How the core is built, and why. Requirements are in [`REQUIREMENTS.md`](REQUIREM
 - Case is folded only when comparing keywords and identifiers. It's never folded in storage.
 - VHDL-2008 syntax is supported: `/* */` comments, bit strings such as `8x"FF"`, matching operators such as `?=`, and `<< >>` external names.
 - **The apostrophe rule:** a tick directly after an identifier, `)`, `]` or the keyword `all` is an attribute or qualified-expression tick, as in `clk'event`, `a'range` and `std_logic'('1')`. Any other tick starts a character literal such as `'1'`. Reserved words other than `all` don't count as identifiers, so in `else'0'` the `'0'` is a literal.
+- **Why the tick rule still matters:** only entities, ports, generics and maps are parsed for meaning (R-IN-10), but the extractor still has to tokenize process bodies correctly to find where they end. If `clk'event` or `std_logic'('1')` were misread, the extractor would lose its place in the file.
+- The tick has to come *directly* after the identifier, so `a '1'`, with a space, is a character literal.
+- Each file is read once into a `const` buffer that stays loaded. The token table points into that buffer, and the writer splices output from it.
 - **Test invariant:** joining the tokens back together reproduces the file byte for byte. Edge-case tests include `x'('1')`, `'''`, `else'0'`, `string'("01")`, and a stray `'` inside a `--` comment.
+
+## Associations the tool can't model
+
+- A slice or conversion-function association stays on its port as locked text, copied through byte for byte.
+- A greyed-out node's port map is one opaque range, copied through byte for byte. If there's a `component` declaration for it, its ports are shown read-only.
+- **Test (edit one wire):** a parent with a slice association and a vendor instance gets one new wire, and the diff shows only that wire.
 
 ## Mismatch flags (R-EDIT-4)
 
@@ -35,4 +44,4 @@ The layout is layered (the Sugiyama method), flowing left to right, in four pass
 
 ## Test corpus (R-TEST-1, open)
 
-The proposal is two open-source VHDL-2008 projects pinned to fixed commits: [neorv32](https://github.com/stnolting/neorv32), a real hierarchy with records in packages, and [Open Logic](https://github.com/open-logic/open-logic), which has many generics and component instantiations. Alex's own ~30 files would make the final acceptance test.
+Alex uses [hdl-modules](https://github.com/hdl-modules/hdl-modules) heavily, and its AXI and AXI-Stream modules are the inspiration for this tool, which makes it the natural first corpus (to be confirmed). The earlier proposal was two open-source VHDL-2008 projects pinned to fixed commits: [neorv32](https://github.com/stnolting/neorv32), a real hierarchy with records in packages, and [Open Logic](https://github.com/open-logic/open-logic), which has many generics and component instantiations. Alex's own ~30 files would make the final acceptance test.
