@@ -12,7 +12,7 @@ How the core is built, and why. Requirements are in [`REQUIREMENTS.md`](REQUIREM
 - **Why the tick rule still matters:** only entities, ports, generics and maps are parsed for meaning (R-IN-10), but the extractor still has to tokenize process bodies correctly to find where they end. If `clk'event` or `std_logic'('1')` were misread, the extractor would lose its place in the file.
 - The tick has to come *directly* after the identifier, so `a '1'`, with a space, is a character literal.
 - A file being edited is read once into a `const` buffer that stays loaded while its graph is open. Its token table points into that buffer, and the writer splices output from it.
-- VHDL projects can have hundreds of files (R-SCALE-2). For the list of available nodes, each file is tokenized, summarized, and freed. The summary copies out only what the list needs: entity name, library, generics, ports, header comment and source path.
+- VHDL projects can have hundreds of files (R-SCALE-2). For the list of available nodes, each file is tokenized, summarized, and freed. The tokenizer itself doesn't change for this. The scan step copies the few names a summary needs (entity, library, generics, port names and types, header comment, source path) into one string arena, storing each name once. Each summary also keeps the file's FNV-1a 64-bit hash.
 - **Test invariant:** joining the tokens back together reproduces the file byte for byte. Edge-case tests include `x'('1')`, `'''`, `else'0'`, `string'("01")`, and a stray `'` inside a `--` comment.
 
 ## Libraries (R-IN-11, R-OUT-5)
@@ -21,6 +21,23 @@ How the core is built, and why. Requirements are in [`REQUIREMENTS.md`](REQUIREM
 - The entity table is keyed on (library, entity name).
 - Resolution: an explicit library plus a `-L` mapping is exact. Otherwise the entity name alone is matched: one match is used, and two or more give a warning listing the files and a greyed-out node. A wrong silent pick would open the wrong ports.
 - The writer copies an existing instance's library name from the `const` source buffer and never retypes it. A new instance uses its `-L` library or `work`, and adds `library x;` to the parent's context clause if it's missing.
+
+## Saving (writer)
+
+- **Change detection:** a file is hashed with FNV-1a 64-bit every time it's loaded for editing and again just before a write. If the hash doesn't match the summary, the tool warns and rescans that file before splicing, so it never splices into stale offsets. There's no size-and-mtime shortcut, because FAT and some network shares record times only to the nearest 2 seconds.
+- **Atomic replace:** the new bytes go to `foo.vhd.tmp` in the same directory and are flushed. The tool then checks the original's hash and renames the temp file over the original, using `MoveFileExW(..., MOVEFILE_REPLACE_EXISTING)` on Windows.
+- **Symlinks:** the link is resolved first, and the target is the file that gets written.
+- **Permissions:** the original's mode is copied onto the temp file before the rename.
+- **Locked files:** if a file is locked (Windows sharing violation), the tool names it, leaves the original untouched and deletes the `.tmp`.
+- **Batch save, in two phases:**
+  1. Write and flush every `.tmp` and check every original's hash.
+  2. Rename only if all of phase 1 passed. Otherwise delete all temp files.
+  - Renames run in dependency order, leaf entities first and parents last, so a partial failure leaves unused new children, never a parent pointing at a missing file. The tool reports which files were saved and which weren't.
+- **Tests:**
+  - A file changed after the scan is detected when opened.
+  - With one graph open over hdl-modules, the number of loaded buffers equals the number of files behind that graph, not 181.
+  - Symlinks, file mode and a locked file each get a test.
+  - With the parent locked, saving a change that adds a new child leaves the child's file written and the parent byte-for-byte unchanged.
 
 ## Associations the tool can't model
 
