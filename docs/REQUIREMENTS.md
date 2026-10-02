@@ -62,7 +62,7 @@ Make it easier to stitch existing VHDL modules together. You open a design, see 
 - **R-OUT-2** Creates new files or overwrites existing ones.
 - **R-OUT-3** A file whose entity was not edited is never touched. *Open: does "untouched" mean byte-for-byte identical? In an edited file, does everything outside the changed parts have to survive exactly, including formatting, line endings and encoding?*
 - **R-OUT-4** In an edited architecture, only what's necessary is rewritten: instances, port maps and signal declarations. Processes, `generate` statements, `block` statements and everything else are copied through unchanged.
-- **R-OUT-5** Output always uses direct instantiation (`entity lib.foo`). An existing instance keeps the library name already in the file, such as `common.` or `fifo.`, copied from the original text. A new instance uses the library its entity is mapped to with `-L` (R-IN-11), or `work` when there's no mapping. If the parent file has no `library` clause for that library, the writer adds one to its context clause. That's the only change made outside the edited entity's instances and signals. *Amended 2026-10-01 from "always `entity work.x`": Alex to confirm.*
+- **R-OUT-5** Output always uses direct instantiation (`entity lib.foo`). An existing instance keeps the library name already in the file, such as `common.` or `fifo.`, copied from the original text. A new instance uses the library its entity is mapped to with `-L` (R-IN-11), or `work` when there's no mapping. If the parent file has no `library` clause for that library, the writer adds one to its context clause. That's the only change made outside the edited entity's instances and signals. *Amended 2026-10-01 from "always `entity work.x`", confirmed by Alex.*
 
 ## Testing
 
@@ -93,7 +93,7 @@ Details are in [`DESIGN.md`](DESIGN.md).
 | 2026-10-01 | Project started. C, Linux and Windows, immediate-mode GPU GUI, no verify or simulate. | Alex |
 | 2026-10-01 | Public repo `awschult002/vhdiagram`, with CI on Ubuntu and Windows (MSYS2 gcc) and tag-triggered releases. | Alex, set up by Chief of Staff |
 | 2026-10-01 | Processes, `generate` and `block` statements aren't modeled and are copied through byte for byte. Only instances, port maps and signal declarations are rewritten. | Alex |
-| 2026-10-01 | Both direct and component instantiation are read; output always uses direct `entity work.x`. | Alex |
+| 2026-10-01 | Both direct and component instantiation are read; output always uses direct instantiation (library rule amended below). | Alex |
 | 2026-10-01 | Recursive nodes mean opening a node into its internal graph. Recursive `generate` isn't supported. | Alex |
 | 2026-10-01 | Type and width mismatches are flagged but allowed, and written out as drawn. | Alex |
 | 2026-10-01 | Node positions aren't saved. Automatic layout on load, plus an Auto layout button. | Alex |
@@ -108,5 +108,5 @@ Details are in [`DESIGN.md`](DESIGN.md).
 | 2026-10-01 | An association the tool can't model, and a greyed-out node's port map, are kept as locked text and copied through byte for byte. A greyed-out node with a `component` declaration shows those ports read-only. | Team (Tester, Dev, Senior) |
 | 2026-10-01 | hdl-modules, with its AXI and AXI-Stream modules, is the inspiration for the tool. | Alex |
 | 2026-10-01 | The test corpus is hdl-modules pinned at `8142d3a`. | Team (Tester), following Alex |
-| 2026-10-01 | Existing library prefixes are kept. New instances take their library from `-L`, or `work`. Entities are keyed by library and name, and an ambiguous name greys the node out with a warning. Amends R-OUT-5; Alex to confirm. | Team (Tester, Dev, Senior, Oracle) |
+| 2026-10-01 | Existing library prefixes are kept. New instances take their library from `-L`, or `work`. Entities are keyed by library and name, and an ambiguous name greys the node out with a warning. Amends R-OUT-5. | Team (Tester, Dev, Senior, Oracle), confirmed by Alex |
 | 2026-10-01 | "About 30 files" means the C codebase. VHDL projects can have hundreds of files. Only the graph being edited stays loaded; the node list keeps summaries only. | Alex |
