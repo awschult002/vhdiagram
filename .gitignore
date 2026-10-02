@@ -1,0 +1,5 @@
+/vhdiagram
+/vhdiagram.exe
+*.o
+*.d
+/build/

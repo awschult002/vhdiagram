@@ -1,0 +1,33 @@
+name: release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: write
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            exe: vhdiagram
+            asset: vhdiagram-linux-x86_64
+          - os: windows-latest
+            exe: vhdiagram.exe
+            asset: vhdiagram-windows-x86_64.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          install: make mingw-w64-ucrt-x86_64-gcc
+      - if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: make && make test && cp ${{ matrix.exe }} ${{ matrix.asset }}
+      - if: runner.os != 'Windows'
+        run: make && make test && cp ${{ matrix.exe }} ${{ matrix.asset }}
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ matrix.asset }}
