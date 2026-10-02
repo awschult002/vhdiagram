@@ -14,7 +14,7 @@ How the core is built, and why. Requirements are in [`REQUIREMENTS.md`](REQUIREM
 ## Mismatch flags (R-EDIT-4)
 
 - Type and width mismatches are flagged, and the connection is written out as drawn.
-- When a width depends on a generic expression, it's marked **unknown**, never guessed. A false mismatch would teach the user to ignore real ones.
+- When a width depends on a generic, the port shows the expression as text (R-NODE-7), and the width check reports **unknown** instead of guessing. A false mismatch would teach the user to ignore real ones.
 - **Test:** an 8-bit to 16-bit wire is flagged, written out exactly as drawn, and flagged again after reloading.
 
 ## Auto layout (R-EDIT-5)
@@ -30,7 +30,7 @@ The layout is layered (the Sugiyama method), flowing left to right, in four pass
 
 - `qsort` isn't stable, and glibc and MSVCRT order ties differently. So the comparator itself breaks ties: barycenter first, then instance name.
 - A barycenter is stored as the sum of positions \(S\) and the neighbor count \(c\), and two nodes are compared by cross-multiplying, \(S_a c_b\) against \(S_b c_a\). There's no division or floating point.
-- A node with no neighbors in the next column (\(c = 0\)) keeps its current position as its sort key.
+- A node with no neighbors in the next column keeps its current position as its sort key, stored as \(S = \text{pos}, c = 1\). Storing it as an empty sum with \(c = 0\) would make both cross products 0, so the node would tie with every other node and the order would fall back to `qsort`. A fixture with one isolated node tests this.
 - **Tests:** the same graph gives the same coordinates on both CI runners, which are diffed against each other, and the result never has more crossings than the unsorted order.
 
 ## Test corpus (R-TEST-1, open)

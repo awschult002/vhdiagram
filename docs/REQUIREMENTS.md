@@ -24,8 +24,9 @@ Make it easier to stitch existing VHDL modules together. You open a design, see 
 - **R-IN-5** Each entity's comment description header is read and shown with its node. *Open: is there a fixed header format, or just the comment block directly above `entity`?*
 - **R-IN-6** Both direct instantiation and component instantiation are read.
 - **R-IN-7** Sources are VHDL-2008. The tokenizer handles 2008 syntax, including `/* */` comments.
-- *Open: when the tool finds VHDL it doesn't understand, or an entity with more than one architecture, should it warn and make that file read-only, or do the best it can?*
-- *Open: are there vendor or IP libraries with no source in the directory (`unisim`, `altera_mf`, generated IP)? Should they become fixed nodes built from a component declaration, or should the tool also read vendor library paths?*
+- *Open: when the tool finds VHDL it doesn't understand, should it warn and make that file read-only, or do the best it can?*
+- **R-IN-8** Only the top file's directory and the directories below it are read. Vendor and library paths are never read.
+- **R-IN-9** An entity that's instantiated but has no declaration anywhere in that tree (vendor primitives, generated IP) is shown as a greyed-out node. It can't be edited or opened.
 
 ## Nodes and connections
 
@@ -36,9 +37,10 @@ Make it easier to stitch existing VHDL modules together. You open a design, see 
 - **R-NODE-5** Recursive nodes are supported: opening a hierarchical node shows its own internal graph. Recursive `generate` (an entity instantiating itself) is not supported.
 - **R-NODE-6** Only entities and their instances are nodes. Processes, `generate` statements and `block` statements are not shown in the editor.
 - **R-CONN-1** A connection is a signal in the generated source code.
-- *Open: does a connection always join a whole port to a whole signal, or are slices, record fields, constants, `open` and conversion functions used in port maps?*
-- *Open: when a port's width depends on a generic, should the node show the expression text, or work out the actual width?*
-- *Open: do any existing files hold more than one entity, and may the tool split them?*
+- **R-CONN-2** For now, a port map connects a whole port to a whole signal. Slices and conversion functions aren't supported yet; they may come later as their own node type. *Open: are record fields, constants or `open` used in port maps?*
+- **R-NODE-7** When a port's width depends on a generic, the node shows the width expression as text and doesn't compute it.
+- **R-NODE-8** A file may hold more than one entity, and those entities are supported. *Open: is a file with several entities written back as one file, or split?*
+- **R-NODE-9** Each entity has exactly one architecture. Entities with more than one architecture aren't supported.
 
 ## Editing
 
@@ -66,6 +68,8 @@ Make it easier to stitch existing VHDL modules together. You open a design, see 
 
 ## Proposed design (team consensus)
 
+Details are in [`DESIGN.md`](DESIGN.md).
+
 - A headless core library, with the GUI as a thin layer on top. The whole core runs in CI without a GPU.
 - A tokenizer plus an extractor, not a full VHDL parser. It recognizes entity, generic, port, component, signal, instance and record declarations, and keeps everything else (processes, `generate` and `block` bodies) as opaque byte ranges that are copied through unchanged.
 - The writer splices only the changed ranges. Source is handled as raw bytes: line endings and encoding are never changed. Each file is hashed when it's parsed. Moving a node never marks it as edited, and an untouched file is never opened for writing.
@@ -87,3 +91,7 @@ Make it easier to stitch existing VHDL modules together. You open a design, see 
 | 2026-10-01 | GUI is cimgui with imnodes, chosen over Nuklear because Nuklear's node editor is too limited. | Alex |
 | 2026-10-01 | Projects are about 30 files. Parsing should be simple, reliable and extensible, not clever. | Alex |
 | 2026-10-01 | VHDL-2008 is the target standard. | Alex |
+| 2026-10-01 | No slices or conversion functions in port maps for now. They may become their own node type later. | Alex |
+| 2026-10-01 | A width that depends on a generic is shown as its expression text, not computed. | Alex |
+| 2026-10-01 | More than one entity per file is supported. More than one architecture per entity isn't. | Alex |
+| 2026-10-01 | Only the top directory and below are read, never vendor paths. Entities with no declaration found there become greyed-out nodes that can't be edited or opened. | Alex |
