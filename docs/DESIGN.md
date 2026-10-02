@@ -11,8 +11,16 @@ How the core is built, and why. Requirements are in [`REQUIREMENTS.md`](REQUIREM
 - **The apostrophe rule:** a tick directly after an identifier, `)`, `]` or the keyword `all` is an attribute or qualified-expression tick, as in `clk'event`, `a'range` and `std_logic'('1')`. Any other tick starts a character literal such as `'1'`. Reserved words other than `all` don't count as identifiers, so in `else'0'` the `'0'` is a literal.
 - **Why the tick rule still matters:** only entities, ports, generics and maps are parsed for meaning (R-IN-10), but the extractor still has to tokenize process bodies correctly to find where they end. If `clk'event` or `std_logic'('1')` were misread, the extractor would lose its place in the file.
 - The tick has to come *directly* after the identifier, so `a '1'`, with a space, is a character literal.
-- Each file is read once into a `const` buffer that stays loaded. The token table points into that buffer, and the writer splices output from it.
+- A file being edited is read once into a `const` buffer that stays loaded while its graph is open. Its token table points into that buffer, and the writer splices output from it.
+- VHDL projects can have hundreds of files (R-SCALE-2). For the list of available nodes, each file is tokenized, summarized, and freed. The summary copies out only what the list needs: entity name, library, generics, ports, header comment and source path.
 - **Test invariant:** joining the tokens back together reproduces the file byte for byte. Edge-case tests include `x'('1')`, `'''`, `else'0'`, `string'("01")`, and a stray `'` inside a `--` comment.
+
+## Libraries (R-IN-11, R-OUT-5)
+
+- hdl-modules puts each module in its own library and instantiates with explicit prefixes such as `entity common.handshake_pipeline` (51 of these) and `entity fifo.fifo` (11). VHDL has no library-to-directory mapping, so the tool takes one from a repeatable `-L lib=dir` flag. Entities with no mapping are in `work`.
+- The entity table is keyed on (library, entity name).
+- Resolution: an explicit library plus a `-L` mapping is exact. Otherwise the entity name alone is matched: one match is used, and two or more give a warning listing the files and a greyed-out node. A wrong silent pick would open the wrong ports.
+- The writer copies an existing instance's library name from the `const` source buffer and never retypes it. A new instance uses its `-L` library or `work`, and adds `library x;` to the parent's context clause if it's missing.
 
 ## Associations the tool can't model
 
@@ -42,6 +50,6 @@ The layout is layered (the Sugiyama method), flowing left to right, in four pass
 - A node with no neighbors in the next column keeps its current position as its sort key, stored as \(S = \text{pos}, c = 1\). Storing it as an empty sum with \(c = 0\) would make both cross products 0, so the node would tie with every other node and the order would fall back to `qsort`. A fixture with one isolated node tests this.
 - **Tests:** the same graph gives the same coordinates on both CI runners, which are diffed against each other, and the result never has more crossings than the unsorted order.
 
-## Test corpus (R-TEST-1, open)
+## Test corpus (R-TEST-1)
 
-Alex uses [hdl-modules](https://github.com/hdl-modules/hdl-modules) heavily, and its AXI and AXI-Stream modules are the inspiration for this tool, which makes it the natural first corpus (to be confirmed). The earlier proposal was two open-source VHDL-2008 projects pinned to fixed commits: [neorv32](https://github.com/stnolting/neorv32), a real hierarchy with records in packages, and [Open Logic](https://github.com/open-logic/open-logic), which has many generics and component instantiations. Alex's own ~30 files would make the final acceptance test.
+[hdl-modules](https://github.com/hdl-modules/hdl-modules) pinned at `8142d3a`: 181 `.vhd` files, 84 synthesizable, all LF. It has record packages (`axi_stream_pkg`), `component` instantiation in the bus-model test code, and a real greyed-out case in `fifo36e2_wrapper` (`unisim`). It has no duplicate entity names, so that case is a fixture written by hand. The earlier proposal was two open-source VHDL-2008 projects pinned to fixed commits: [neorv32](https://github.com/stnolting/neorv32), a real hierarchy with records in packages, and [Open Logic](https://github.com/open-logic/open-logic), which has many generics and component instantiations. Alex's own ~30 files would make the final acceptance test.

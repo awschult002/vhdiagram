@@ -24,6 +24,11 @@ Make it easier to stitch existing VHDL modules together. You open a design, see 
 - **R-IN-5** Each entity's comment description header is read and shown with its node. *Open: is there a fixed header format, or just the comment block directly above `entity`?*
 - **R-IN-6** Both direct instantiation and component instantiation are read.
 - **R-IN-10** Only entities, generics, ports, component declarations, instances with their generic and port maps, and signal declarations are parsed for meaning. Everything else, such as process bodies and attributes like `clk'event`, is only tokenized so the extractor can skip over it.
+- **R-IN-11** Library resolution:
+  - The entity table is keyed on the pair of library and entity name.
+  - A repeatable `-L lib=dir` flag maps a library to a directory, as build tools do. Entities with no mapping are in `work`.
+  - When an instance names its library and a `-L` mapping covers it, it resolves exactly.
+  - Otherwise it matches on entity name alone. If exactly one entity matches, that's used. If two or more match, the tool warns, names every matching file, and greys the node out instead of picking one.
 - **R-IN-7** Sources are VHDL-2008. The tokenizer handles 2008 syntax, including `/* */` comments.
 - *Open: when the tool finds VHDL it doesn't understand, should it warn and make that file read-only, or do the best it can?*
 - **R-IN-8** Only the top file's directory and the directories below it are read. Vendor and library paths are never read.
@@ -57,15 +62,18 @@ Make it easier to stitch existing VHDL modules together. You open a design, see 
 - **R-OUT-2** Creates new files or overwrites existing ones.
 - **R-OUT-3** A file whose entity was not edited is never touched. *Open: does "untouched" mean byte-for-byte identical? In an edited file, does everything outside the changed parts have to survive exactly, including formatting, line endings and encoding?*
 - **R-OUT-4** In an edited architecture, only what's necessary is rewritten: instances, port maps and signal declarations. Processes, `generate` statements, `block` statements and everything else are copied through unchanged.
-- **R-OUT-5** Output always uses direct instantiation (`entity work.foo`).
+- **R-OUT-5** Output always uses direct instantiation (`entity lib.foo`). An existing instance keeps the library name already in the file, such as `common.` or `fifo.`, copied from the original text. A new instance uses the library its entity is mapped to with `-L` (R-IN-11), or `work` when there's no mapping. If the parent file has no `library` clause for that library, the writer adds one to its context clause. That's the only change made outside the edited entity's instances and signals. *Amended 2026-10-01 from "always `entity work.x`": Alex to confirm.*
 
 ## Testing
 
-- *Open: **R-TEST-1** needs a reference VHDL corpus for the no-change round-trip test (load, change nothing, write, diff is empty). Should it be about 30 of Alex's own files or an open-source project?* Alex uses [hdl-modules](https://github.com/hdl-modules/hdl-modules) heavily, and its AXI and AXI-Stream modules are the inspiration for this tool, so it's the leading corpus candidate (to be confirmed).
+- **R-TEST-1** The reference corpus for the no-change round-trip test (load, change nothing, write, diff is empty) is [hdl-modules](https://github.com/hdl-modules/hdl-modules) pinned at commit `8142d3a`: 181 `.vhd` files, 84 of them synthesizable, all with LF line endings. Its AXI and AXI-Stream modules are the inspiration for this tool. Alex's own files would make the final acceptance test.
+- **R-TEST-2** Fixtures written by hand cover what hdl-modules doesn't have, such as two `fifo` entities in different directories. Without `-L`, the tool warns, lists both files and greys the node out. With `-L fifo=a/`, the instance resolves to `a/fifo.vhd`.
+- **R-TEST-3** Edit one wire in an `axi` module: every `common.` and `fifo.` prefix survives unchanged.
 
 ## Scale
 
-- **R-SCALE-1** Typical projects have about 30 files, though the tool shouldn't be limited to that. Parsing should be simple, reliable and easy to extend, not clever.
+- **R-SCALE-1** The tool itself should stay small, about 30 C source files. The VHDL projects it opens can have hundreds of files. Parsing should be simple, reliable and easy to extend, not clever. *Corrected 2026-10-01: "about 30 files" meant the C codebase, not the VHDL input.*
+- **R-SCALE-2** Only the file or files behind the graph being edited stay loaded in memory. Building the list of available nodes reads each file, keeps a small summary (entity name, library, generics, ports, header comment and source path), and then frees the file.
 
 ## Proposed design (team consensus)
 
@@ -90,7 +98,7 @@ Details are in [`DESIGN.md`](DESIGN.md).
 | 2026-10-01 | Type and width mismatches are flagged but allowed, and written out as drawn. | Alex |
 | 2026-10-01 | Node positions aren't saved. Automatic layout on load, plus an Auto layout button. | Alex |
 | 2026-10-01 | GUI is cimgui with imnodes, chosen over Nuklear because Nuklear's node editor is too limited. | Alex |
-| 2026-10-01 | Projects are about 30 files. Parsing should be simple, reliable and extensible, not clever. | Alex |
+| 2026-10-01 | Parsing should be simple, reliable and extensible, not clever. | Alex |
 | 2026-10-01 | VHDL-2008 is the target standard. | Alex |
 | 2026-10-01 | No slices or conversion functions in port maps for now. They may become their own node type later. | Alex |
 | 2026-10-01 | A width that depends on a generic is shown as its expression text, not computed. | Alex |
@@ -99,3 +107,6 @@ Details are in [`DESIGN.md`](DESIGN.md).
 | 2026-10-01 | Only entities, ports, generics and maps are parsed for meaning. Everything else is skipped as tokens. | Alex |
 | 2026-10-01 | An association the tool can't model, and a greyed-out node's port map, are kept as locked text and copied through byte for byte. A greyed-out node with a `component` declaration shows those ports read-only. | Team (Tester, Dev, Senior) |
 | 2026-10-01 | hdl-modules, with its AXI and AXI-Stream modules, is the inspiration for the tool. | Alex |
+| 2026-10-01 | The test corpus is hdl-modules pinned at `8142d3a`. | Team (Tester), following Alex |
+| 2026-10-01 | Existing library prefixes are kept. New instances take their library from `-L`, or `work`. Entities are keyed by library and name, and an ambiguous name greys the node out with a warning. Amends R-OUT-5; Alex to confirm. | Team (Tester, Dev, Senior, Oracle) |
+| 2026-10-01 | "About 30 files" means the C codebase. VHDL projects can have hundreds of files. Only the graph being edited stays loaded; the node list keeps summaries only. | Alex |
