@@ -33,6 +33,9 @@ How the core is built, and why. Requirements are in [`REQUIREMENTS.md`](REQUIREM
   1. Write and flush every `.tmp` and check every original's hash.
   2. Rename only if all of phase 1 passed. Otherwise delete all temp files.
   - Renames run in dependency order, leaf entities first and parents last, so a partial failure leaves unused new children, never a parent pointing at a missing file. The tool reports which files were saved and which weren't.
+- **Durability:** before its rename, each temp file is synced to disk (`fsync` on Linux, `FlushFileBuffers` on Windows). `fflush` alone isn't enough. On Linux the directory is also synced after the renames.
+- **File operations table:** the writer never calls the OS directly. It takes a table of six operations: open, write, sync, rename, remove and sync the directory. On Linux they map to `fsync`, `rename` and a directory `fsync`. On Windows they map to `FlushFileBuffers` and `MoveFileExW`, and the directory sync does nothing. The code that orders the save never mentions a platform and has no `#ifdef`.
+- **Failure injection:** tests pass a table that fails on the Nth call to any operation, including sync. Both runners test a failure at every step of each phase: a phase 1 failure leaves the disk unchanged, and a partial phase 2 leaves the child written and the parent byte-for-byte unchanged. Linux has no mandatory locks, so the real lock test runs only on Windows.
 - **Tests:**
   - A file changed after the scan is detected when opened.
   - With one graph open over hdl-modules, the number of loaded buffers equals the number of files behind that graph, not 181.
