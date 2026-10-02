@@ -12,7 +12,7 @@ Make it easier to stitch existing VHDL modules together. You open a design, see 
 
 - **R-PLAT-1** Desktop application for Linux and Windows.
 - **R-PLAT-2** Written in C, built with a clean `Makefile`.
-- **R-PLAT-3** Immediate-mode GUI with GPU support, for example Dear ImGui. *Open: is C++ under a C interface (cimgui + imnodes) acceptable, or does it have to be pure C (for example Nuklear)?*
+- **R-PLAT-3** Immediate-mode GUI with GPU support: cimgui with imnodes. The C++ is vendored and pinned in `third_party/`, behind the cimgui C interface. Nuklear's node editor was judged too limited.
 - **R-PLAT-4** Hosted on GitHub, with CI test runners and release builds for both platforms. *Status: CI and tag-triggered release workflows are set up.*
 
 ## Input and scanning
@@ -21,55 +21,56 @@ Make it easier to stitch existing VHDL modules together. You open a design, see 
 - **R-IN-2** Scan the containing directory recursively for VHDL files and parse every entity found.
 - **R-IN-3** Every entity found goes into the list of available nodes.
 - **R-IN-4** The editor opens with the node graph of the top-level entity.
-- *Open: when the tool finds VHDL it doesn't understand, should it warn and make that file read-only, or quietly do its best?*
-- *Open: which VHDL standard do your sources use: '93, 2008 or 2019?*
-- *Open: are there vendor or IP libraries with no source in the directory (`unisim`, `altera_mf`, generated IP)? Should they become fixed nodes built from a component declaration, or should the tool also read vendor library paths?*
 - **R-IN-5** Each entity's comment description header is read and shown with its node. *Open: is there a fixed header format, or just the comment block directly above `entity`?*
+- **R-IN-6** Both direct instantiation and component instantiation are read.
+- **R-IN-7** Sources are VHDL-2008. The tokenizer handles 2008 syntax, including `/* */` comments.
+- *Open: when the tool finds VHDL it doesn't understand, or an entity with more than one architecture, should it warn and make that file read-only, or do the best it can?*
+- *Open: are there vendor or IP libraries with no source in the directory (`unisim`, `altera_mf`, generated IP)? Should they become fixed nodes built from a component declaration, or should the tool also read vendor library paths?*
 
 ## Nodes and connections
 
 - **R-NODE-1** Each node is a VHDL entity.
 - **R-NODE-2** A node's ports are the entity's VHDL ports.
 - **R-NODE-3** A node's parameters are the entity's generics.
-- **R-NODE-4** Records are supported. *Open: should the tool parse packages for record types, and should a record be connected as a whole or by individual fields?*
-- **R-NODE-5** Recursive nodes are supported: you can open a node to see its own internal graph. *Open: does this also cover an entity that instantiates itself through `generate`?*
+- **R-NODE-4** Records are supported, and packages are read for record types. *Open: is a record port one wire carrying the whole record, or does it expand into its fields?*
+- **R-NODE-5** Recursive nodes are supported: opening a hierarchical node shows its own internal graph. Recursive `generate` (an entity instantiating itself) is not supported.
+- **R-NODE-6** Only entities and their instances are nodes. Processes, `generate` statements and `block` statements are not shown in the editor.
 - **R-CONN-1** A connection is a signal in the generated source code.
 - *Open: does a connection always join a whole port to a whole signal, or are slices, record fields, constants, `open` and conversion functions used in port maps?*
 - *Open: when a port's width depends on a generic, should the node show the expression text, or work out the actual width?*
-- *Open: do any entities have more than one architecture, and which one does the graph show? Do any existing files hold more than one entity, and may the tool split them?*
+- *Open: do any existing files hold more than one entity, and may the tool split them?*
 
 ## Editing
 
 - **R-EDIT-1** Drag and drop nodes onto the graph from the available list.
 - **R-EDIT-2** Connect node ports to each other.
 - **R-EDIT-3** Create new custom entities, open them, and add to them recursively.
-- *Open: should the tool flag obvious problems such as a width mismatch or two drivers on one signal, or write out whatever was drawn?*
-- *Open: where should node positions be stored: a sidecar file, or structured comments in the VHDL?*
+- **R-EDIT-4** A type mismatch or width mismatch on a connection is flagged, but allowed. If the user keeps it, it's written out as drawn.
+- **R-EDIT-5** Node positions are not saved. On load, an automatic layout spreads the nodes out reasonably, and the user can move them. An **Auto layout** button reruns the layout.
 
 ## Output
 
 - **R-OUT-1** Writes one or more VHDL files: one entity per node and one file per entity.
 - **R-OUT-2** Creates new files or overwrites existing ones.
 - **R-OUT-3** A file whose entity was not edited is never touched. *Open: does "untouched" mean byte-for-byte identical? In an edited file, does everything outside the changed parts have to survive exactly, including formatting, line endings and encoding?*
-- *Open: in an edited architecture that also has processes, concurrent assignments or `generate`, should only the instances, port maps and signal declarations be rewritten, with everything else kept exactly as written?*
-- *Open: direct instantiation (`entity work.foo`), component declarations, or both?*
+- **R-OUT-4** In an edited architecture, only what's necessary is rewritten: instances, port maps and signal declarations. Processes, `generate` statements, `block` statements and everything else are copied through unchanged.
+- **R-OUT-5** Output always uses direct instantiation (`entity work.foo`).
 
 ## Testing
 
-- *Open: **R-TEST-1** needs a reference VHDL corpus for the no-change round-trip test (load, change nothing, write, diff is empty). Should it be Alex's own sources or an open-source project?*
+- *Open: **R-TEST-1** needs a reference VHDL corpus for the no-change round-trip test (load, change nothing, write, diff is empty). Should it be about 30 of Alex's own files or an open-source project?*
 
 ## Scale
 
-- *Open: how many files and entities are in a typical project?*
+- **R-SCALE-1** Typical projects have about 30 files, though the tool shouldn't be limited to that. Parsing should be simple, reliable and easy to extend, not clever.
 
-## Proposed design (team consensus, waiting on Alex's answers)
+## Proposed design (team consensus)
 
 - A headless core library, with the GUI as a thin layer on top. The whole core runs in CI without a GPU.
-- A tokenizer plus an extractor, not a full VHDL parser. It recognizes entity, generic, port, component, signal, instance and record declarations, and keeps everything else (processes, `generate` bodies) as opaque byte ranges that are copied through unchanged.
+- A tokenizer plus an extractor, not a full VHDL parser. It recognizes entity, generic, port, component, signal, instance and record declarations, and keeps everything else (processes, `generate` and `block` bodies) as opaque byte ranges that are copied through unchanged.
 - The writer splices only the changed ranges. Source is handled as raw bytes: line endings and encoding are never changed. Each file is hashed when it's parsed. Moving a node never marks it as edited, and an untouched file is never opened for writing.
 - Signals are first-class net objects, each with one driver and any number of readers. The GUI draws a net as a fan of links.
 - The instance hierarchy is checked for cycles when it loads. A self-instantiating entity appears as a back-reference node that can't be expanded.
-- GUI: cimgui and imnodes, vendored and pinned in `third_party/`, so our own code stays C.
 - First CI gates: no-op round trip, a single edit, idempotence, tokenizer edge cases, and the cycle check. The corpus is marked `-text` in `.gitattributes`.
 
 ## Decision log
@@ -78,3 +79,11 @@ Make it easier to stitch existing VHDL modules together. You open a design, see 
 |---|---|---|
 | 2026-10-01 | Project started. C, Linux and Windows, immediate-mode GPU GUI, no verify or simulate. | Alex |
 | 2026-10-01 | Public repo `awschult002/vhdiagram`, with CI on Ubuntu and Windows (MSYS2 gcc) and tag-triggered releases. | Alex, set up by Chief of Staff |
+| 2026-10-01 | Processes, `generate` and `block` statements aren't modeled and are copied through byte for byte. Only instances, port maps and signal declarations are rewritten. | Alex |
+| 2026-10-01 | Both direct and component instantiation are read; output always uses direct `entity work.x`. | Alex |
+| 2026-10-01 | Recursive nodes mean opening a node into its internal graph. Recursive `generate` isn't supported. | Alex |
+| 2026-10-01 | Type and width mismatches are flagged but allowed, and written out as drawn. | Alex |
+| 2026-10-01 | Node positions aren't saved. Automatic layout on load, plus an Auto layout button. | Alex |
+| 2026-10-01 | GUI is cimgui with imnodes, chosen over Nuklear because Nuklear's node editor is too limited. | Alex |
+| 2026-10-01 | Projects are about 30 files. Parsing should be simple, reliable and extensible, not clever. | Alex |
+| 2026-10-01 | VHDL-2008 is the target standard. | Alex |
