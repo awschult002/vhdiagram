@@ -21,6 +21,9 @@
  *   nested "package p is" (not "is new") and "package body p is",
  *   and, in a configuration only, "for" (block and component
  *   configurations close with "end for").
+ * Attribute declarations and specifications are skipped up to their
+ * ";", so the entity class in "attribute a of f : function is ...;"
+ * opens nothing.
  * Every "end" closes one construct; an "end" at depth 0 ends the unit,
  * whatever follows it (end; end entity; end rtl; ...). Outside a
  * configuration, "end for" (an optional end of a configuration
@@ -411,22 +414,47 @@ static int ends_alternative(const Walk *w, size_t i)
 	       (k == TK_KW_END && kind_at(w, j + 2) == TK_KW_GENERATE);
 }
 
-/* Inside a unit: track depth and notice the unit's end. */
-static void inside_unit(Walk *w, size_t i)
+/* From "attribute" at i: the index after its ";" (at paren depth 0).
+ * Covers declarations and specifications such as
+ * "attribute a of f : function is ...;", whose entity class keyword
+ * (function, units, package, component, ...) opens nothing. */
+static size_t skip_attribute(const Walk *w, size_t i)
 {
+	size_t paren = 0;
+
+	for (i++; i < w->ncode; i++) {
+		uint32_t k = kind_at(w, i);
+
+		if (k == TK_LPAREN)
+			paren++;
+		else if (k == TK_RPAREN && paren > 0)
+			paren--;
+		else if (k == TK_SEMI && paren == 0)
+			return i + 1;
+	}
+	return i;
+}
+
+/* Inside a unit: track depth and notice the unit's end. Returns the
+ * index of the next token to look at. */
+static size_t inside_unit(Walk *w, size_t i)
+{
+	if (kind_at(w, i) == TK_KW_ATTRIBUTE)
+		return skip_attribute(w, i);
 	if (kind_at(w, i) == TK_KW_END) {
 		if (kind_at(w, i + 1) == TK_KW_FOR && !w->in_config)
-			return;
+			return i + 1;
 		if (ends_alternative(w, i))
-			return;
+			return i + 1;
 		if (w->depth == 0)
 			w->in_unit = 0;
 		else
 			w->depth--;
-		return;
+		return i + 1;
 	}
 	if (opens_block(w, i))
 		w->depth++;
+	return i + 1;
 }
 
 /* Recognize a unit header at code token i. Returns 1 if one was added,
@@ -481,8 +509,7 @@ static int walk(Walk *w)
 		uint32_t k = kind_at(w, i);
 
 		if (w->in_unit) {
-			inside_unit(w, i);
-			i++;
+			i = inside_unit(w, i);
 			continue;
 		}
 		if (k == TK_KW_LIBRARY || k == TK_KW_USE ||

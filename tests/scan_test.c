@@ -654,6 +654,34 @@ static void test_generate_alternative_ends(void)
 		"entity after_it is end;\n", e, 3);
 }
 
+static void test_attribute_specs(void)
+{
+	static const ExpUnit e[] = {
+		{ SCAN_PACKAGE, "p", NULL, 1 },
+		{ SCAN_PACKAGE, "after_attr", NULL, 4 },
+		{ SCAN_ARCHITECTURE, "rtl", "e", 5 },
+		{ SCAN_ENTITY, "after_arch", NULL, 17 },
+	};
+	check_units("attribute specifications with entity classes",
+		"package p is\n"
+		"  attribute a of f : function is \"x\";\n"
+		"end package;\n"
+		"package after_attr is end;\n"
+		"architecture rtl of e is\n"
+		"  attribute a : string;\n"
+		"  attribute a of pr [bit] : procedure is \"y\";\n"
+		"  attribute a of ps : units is \"z\";\n"
+		"  attribute a of all : package is \"w\";\n"
+		"  attribute a of c : component is f(\";\", 1);\n"
+		"  attribute a of e : entity is \"v\";\n"
+		"  attribute a of others : record is \"u\";\n"
+		"  attribute a of b : block is \"t\";\n"
+		"  attribute a of l : loop is \"s\";\n"
+		"begin\n"
+		"end;\n"
+		"entity after_arch is end;\n", e, 4);
+}
+
 static void test_missing_file(void)
 {
 	ScanResult sr;
@@ -686,6 +714,7 @@ int main(void)
 	test_subprogram_forms();
 	test_generates_and_loops();
 	test_generate_alternative_ends();
+	test_attribute_specs();
 	test_missing_file();
 	printf("scan_test: %d/%d passed\n", ntests - nfail, ntests);
 	return nfail ? 1 : 0;
