@@ -337,7 +337,7 @@ static void test_malformed(void)
 		ScanResult sr;
 		scan_init(&sr);
 		CHECK(scan_text(&sr, "trunc.vhd",
-			"entity e is port (a : in bit);\n"
+			"entity e is port (a : in bit); end;\n"
 			"architecture rtl of e is begin process begin") == 0,
 		      "truncated");
 		CHECK(unit_is(&sr, 0, SCAN_ENTITY, "e", NULL) &&
@@ -346,7 +346,173 @@ static void test_malformed(void)
 		CHECK(sr.file[0].nerr == 0, "nerr");
 		scan_free(&sr);
 	}
+	{
+		/* a unit with no end swallows the rest of the file */
+		ScanResult sr;
+		scan_init(&sr);
+		CHECK(scan_text(&sr, "noend.vhd",
+			"entity e is port (a : in bit);\n"
+			"architecture rtl of e is begin end;\n") == 0, "no end");
+		CHECK(sr.nunit == 1 && unit_is(&sr, 0, SCAN_ENTITY, "e", NULL),
+		      "only the open unit");
+		scan_free(&sr);
+	}
 	report("malformed and truncated input", ok);
+}
+
+
+/* Check that text gives exactly the units listed, with their lines. */
+typedef struct {
+	uint32_t kind;
+	const char *name, *of;
+	uint32_t line;
+} ExpUnit;
+
+static int units_are(const ScanResult *sr, const ExpUnit *e, size_t n)
+{
+	size_t i;
+
+	if (sr->nunit != n)
+		return 0;
+	for (i = 0; i < n; i++)
+		if (!unit_is(sr, i, e[i].kind, e[i].name, e[i].of) ||
+		    sr->unit[i].line != e[i].line)
+			return 0;
+	return 1;
+}
+
+static void check_units(const char *test, const char *text,
+			const ExpUnit *e, size_t n)
+{
+	ScanResult sr;
+	int ok = 1;
+
+	scan_init(&sr);
+	CHECK(scan_text(&sr, "t.vhd", text) == 0, "scan failed");
+	CHECK(units_are(&sr, e, n), "units differ");
+	if (!ok)
+		print_units(&sr);
+	scan_free(&sr);
+	report(test, ok);
+}
+
+static void test_direct_instantiation(void)
+{
+	static const ExpUnit e[] = {
+		{ SCAN_ARCHITECTURE, "top_rtl", "top", 1 },
+		{ SCAN_ENTITY, "after_it", NULL, 8 },
+	};
+	check_units("direct instantiation is not a unit",
+		"architecture top_rtl of top is\n"
+		"  signal s : bit;\n"
+		"begin\n"
+		"  u1: entity work.foo(rtl) port map(a => s);\n"
+		"  u2 : entity work.bar generic map (N => 2) port map (s);\n"
+		"  u3: configuration work.cfg port map (s);\n"
+		"end architecture top_rtl;\n"
+		"entity after_it is end;\n", e, 2);
+}
+
+static void test_configuration_bindings(void)
+{
+	static const ExpUnit e[] = {
+		{ SCAN_ARCHITECTURE, "a", "top", 1 },
+		{ SCAN_CONFIGURATION, "cfg", "top", 7 },
+		{ SCAN_PACKAGE, "after_it", NULL, 18 },
+	};
+	check_units("configuration bindings are not units",
+		"architecture a of top is\n"
+		"  component c is port (x : in bit); end component;\n"
+		"  for all: c use entity work.foo;\n"
+		"  for u9 : c use configuration work.cfg; end for;\n"
+		"begin\n"
+		"end a;\n"
+		"configuration cfg of top is\n"
+		"  for a\n"
+		"    for all : c use entity work.foo(rtl);\n"
+		"    end for;\n"
+		"    for g\n"
+		"      for u2 : c use configuration work.sub_cfg; end for;\n"
+		"    end for;\n"
+		"    for u3 : c use entity work.bar; end for;\n"
+		"  end for;\n"
+		"end;\n"
+		"\n"
+		"package after_it is end;\n", e, 3);
+}
+
+static void test_generic_packages(void)
+{
+	static const ExpUnit e[] = {
+		{ SCAN_ENTITY, "user", NULL, 1 },
+		{ SCAN_PACKAGE, "gpkg", NULL, 7 },
+		{ SCAN_ARCHITECTURE, "rtl", "user", 14 },
+	};
+	check_units("generic package declarations are not units",
+		"entity user is\n"
+		"  generic (package p is new work.q generic map (<>);\n"
+		"           package r is new work.q generic map (N => 3);\n"
+		"           function f return bit is <>);\n"
+		"  port (a : in bit);\n"
+		"end entity;\n"
+		"package gpkg is\n"
+		"  generic (package p is new work.q generic map (<>);\n"
+		"           type t; procedure pr (x : t) is default_pr);\n"
+		"  function g is new work.gen_f generic map (t => bit);\n"
+		"  type i is range 0 to 7;\n"
+		"  subtype s is i range 0 to 3;\n"
+		"end package gpkg;\n"
+		"architecture rtl of user is begin end;\n", e, 3);
+}
+
+static void test_nested_package(void)
+{
+	static const ExpUnit e[] = {
+		{ SCAN_ARCHITECTURE, "rtl", "e", 1 },
+		{ SCAN_PACKAGE_BODY, "outer", "outer", 32 },
+		{ SCAN_ENTITY, "last", NULL, 40 },
+	};
+	check_units("nested packages are not top-level units",
+		"architecture rtl of e is\n"
+		"  package inner is\n"
+		"    type r is record a : bit; end record;\n"
+		"    function f return bit;\n"
+		"  end package;\n"
+		"  package body inner is\n"
+		"    function f return bit is begin return '0'; end;\n"
+		"  end package body;\n"
+		"  type t is range 0 to 3;\n"
+		"  subtype u is t;\n"
+		"  alias al is s;\n"
+		"  attribute keep : boolean;\n"
+		"  attribute keep of s : signal is true;\n"
+		"  type pt is protected function get return bit; end protected;\n"
+		"begin\n"
+		"  b : block is begin end block;\n"
+		"  g : for i in 0 to 1 generate begin end generate;\n"
+		"  h : if c generate elsif d generate else generate end generate;\n"
+		"  k : case v generate when 0 => when others => end generate;\n"
+		"  p : process is\n"
+		"    package pp is end package;\n"
+		"    procedure pr is begin null; end;\n"
+		"    variable x : bit;\n"
+		"  begin\n"
+		"    if x = '1' then null; elsif x = '0' then null; else null; end if;\n"
+		"    case x is when others => null; end case;\n"
+		"    for i in 0 to 1 loop null; end loop;\n"
+		"    while false loop null; end loop;\n"
+		"    wait;\n"
+		"  end process;\n"
+		"end;\n"
+		"package body outer is\n"
+		"  function f return bit is\n"
+		"    function g return bit is begin return '1'; end;\n"
+		"  begin\n"
+		"    return g;\n"
+		"  end;\n"
+		"  procedure q; procedure q is begin null; end procedure;\n"
+		"end;\n"
+		"entity last is end;\n", e, 3);
 }
 
 static void test_missing_file(void)
@@ -372,6 +538,10 @@ int main(void)
 	test_names_outlive_buffer();
 	test_arena_growth();
 	test_malformed();
+	test_direct_instantiation();
+	test_configuration_bindings();
+	test_generic_packages();
+	test_nested_package();
 	test_missing_file();
 	printf("scan_test: %d/%d passed\n", ntests - nfail, ntests);
 	return nfail ? 1 : 0;

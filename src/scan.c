@@ -1,4 +1,32 @@
-/* scan.c - scan step: list the design units in VHDL files; see scan.h. */
+/*
+ * scan.c - scan step: list the design units in VHDL files; see scan.h.
+ *
+ * This is a token walk, not a parser. Outside any unit only context
+ * clauses (library, use, context references) and unit headers are
+ * looked at; a unit keyword starts a unit only there, so instantiations
+ * ("u : entity work.e"), bindings ("use entity work.e",
+ * "use configuration work.c"), generic packages ("package p is new
+ * ... generic map (<>)") and packages nested in an architecture are
+ * never mistaken for units.
+ *
+ * Inside a unit the walker keeps a depth: the number of open constructs
+ * that close with their own "end". It does not count "is" (type,
+ * subtype, alias and attribute declarations have "is" and no "end").
+ * Openers, each counted when not directly after "end":
+ *   process, block, record, units, protected, component (not after ":"),
+ *   if / case (sequential statements, or if/case generate), loop,
+ *   generate (for-generate only: the "generate" of an if/case/elsif/else
+ *   generate belongs to the if or case already counted),
+ *   function/procedure bodies ("is" not followed by "new" or "<>"),
+ *   nested "package p is" (not "is new") and "package body p is",
+ *   and, in a configuration only, "for" (block and component
+ *   configurations close with "end for").
+ * Every "end" closes one construct; an "end" at depth 0 ends the unit,
+ * whatever follows it (end; end entity; end rtl; ...). Outside a
+ * configuration, "end for" (an optional end of a configuration
+ * specification) closes nothing. Known gap: the optional "end alt;" of a
+ * 2008 generate alternative is not modelled.
+ */
 #include "scan.h"
 
 #include <stdio.h>
@@ -116,8 +144,9 @@ typedef struct {
 	uint32_t file;
 	size_t first_ref;    /* refs from here on wait for the next unit */
 	int in_unit;         /* inside a unit, between its header and end */
-	size_t unit_kw;      /* keyword kind that opened the current unit */
-	size_t unit_name_tok;
+	int in_config;       /* the current unit is a configuration */
+	size_t depth;        /* open constructs inside the unit, see above */
+	size_t skip_gen;     /* "generate" already counted by its if/case */
 } Walk;
 
 static uint32_t kind_at(const Walk *w, size_t i)
@@ -144,30 +173,6 @@ static uint32_t name_at(Walk *w, size_t i)
 	const unsigned char *p = text_at(w, i, &len);
 
 	return store_name(w->sr, p, len);
-}
-
-/* Do code tokens i and j spell the same VHDL name? */
-static int same_name(const Walk *w, size_t i, size_t j)
-{
-	size_t ilen, jlen, k;
-	const unsigned char *a = text_at(w, i, &ilen);
-	const unsigned char *b = text_at(w, j, &jlen);
-
-	if (ilen != jlen)
-		return 0;
-	if (kind_at(w, i) == TK_EXT_IDENT || kind_at(w, j) == TK_EXT_IDENT)
-		return kind_at(w, i) == kind_at(w, j) &&
-		       memcmp(a, b, ilen) == 0;
-	for (k = 0; k < ilen; k++) {
-		unsigned char x = a[k], y = b[k];
-		if (x >= 'A' && x <= 'Z')
-			x = (unsigned char)(x - 'A' + 'a');
-		if (y >= 'A' && y <= 'Z')
-			y = (unsigned char)(y - 'A' + 'a');
-		if (x != y)
-			return 0;
-	}
-	return 1;
 }
 
 static uint32_t line_of(const Walk *w, size_t i)
@@ -207,8 +212,8 @@ static int add_unit(Walk *w, uint32_t kind, size_t name_tok, uint32_t of,
 	sr->nunit++;
 
 	w->in_unit = 1;
-	w->unit_kw = kind_at(w, kw_tok);
-	w->unit_name_tok = name_tok;
+	w->in_config = kind == SCAN_CONFIGURATION;
+	w->depth = 0;
 	return 0;
 }
 
@@ -276,7 +281,7 @@ static int context_item(Walk *w, size_t *i, uint32_t kind)
 
 		if (id == (uint32_t)-1)
 			return -1;
-		if (id && !w->in_unit && add_ref(w, kind, id))
+		if (id && add_ref(w, kind, id))
 			return -1;
 		if (!id || kind_at(w, *i) != TK_COMMA) {
 			if (!id)
@@ -288,39 +293,120 @@ static int context_item(Walk *w, size_t *i, uint32_t kind)
 	return 0;
 }
 
-/* Starts a design unit after the end of a bare "end;"? */
-static int starts_unit(uint32_t kind)
+/* From an if, case, elsif or else at i: the "generate" that comes
+ * before any "then", "is", "loop" or ";" (outside parentheses), or
+ * (size_t)-1 if the statement is not a generate. */
+static size_t generate_ahead(const Walk *w, size_t i)
 {
-	return kind == TK_NONE || kind == TK_KW_LIBRARY ||
-	       kind == TK_KW_USE || kind == TK_KW_CONTEXT ||
-	       kind == TK_KW_ENTITY || kind == TK_KW_ARCHITECTURE ||
-	       kind == TK_KW_PACKAGE || kind == TK_KW_CONFIGURATION;
+	size_t paren = 0;
+
+	for (i++; i < w->ncode; i++) {
+		uint32_t k = kind_at(w, i);
+
+		if (k == TK_LPAREN)
+			paren++;
+		else if (k == TK_RPAREN && paren > 0)
+			paren--;
+		else if (paren > 0)
+			continue;
+		else if (k == TK_KW_GENERATE)
+			return i;
+		else if (k == TK_KW_THEN || k == TK_KW_IS || k == TK_KW_LOOP ||
+			 k == TK_SEMI)
+			break;
+	}
+	return (size_t)-1;
 }
 
-/* At an "end": does it close the current unit? Accepted forms are
- * "end [unit-keyword] [name] ;" where the keyword or name matches the
- * unit, or a bare "end ;" followed by the start of another unit or the
- * end of the file. Nested "end process;", "end if;" do not match. */
-static int ends_unit(const Walk *w, size_t i)
+/* From a function or procedure at i: is this a body? A declaration
+ * ends in ";" (or ")" in a generic list) before any "is"; "is new" is an
+ * instantiation and "is <>" a generic default. */
+static int subprogram_body(const Walk *w, size_t i)
 {
-	size_t j = i + 1;
-	int matched = 0;
+	size_t paren = 0;
 
-	if (kind_at(w, j) == (uint32_t)w->unit_kw) {
-		matched = 1;
-		j++;
-		if (w->unit_kw == TK_KW_PACKAGE && kind_at(w, j) == TK_KW_BODY)
-			j++;
-	}
-	if (is_name(kind_at(w, j))) {
-		if (!same_name(w, j, w->unit_name_tok))
+	for (i++; i < w->ncode; i++) {
+		uint32_t k = kind_at(w, i);
+
+		if (k == TK_LPAREN) {
+			paren++;
+		} else if (k == TK_RPAREN) {
+			if (paren == 0)
+				return 0;
+			paren--;
+		} else if (paren == 0 && k == TK_SEMI) {
 			return 0;
-		matched = 1;
-		j++;
+		} else if (paren == 0 && k == TK_KW_IS) {
+			k = kind_at(w, i + 1);
+			if (k == TK_KW_NEW || k == TK_BOX)
+				return 0;
+			/* "is default_name" closing a generic item */
+			k = kind_at(w, i + 2);
+			if (is_name(kind_at(w, i + 1)) &&
+			    (k == TK_SEMI || k == TK_RPAREN))
+				return 0;
+			return 1;
+		}
 	}
-	if (kind_at(w, j) != TK_SEMI)
+	return 0;
+}
+
+/* Does code token i open a construct that closes with "end"? */
+static int opens_block(Walk *w, size_t i)
+{
+	uint32_t k = kind_at(w, i);
+	uint32_t prev = i > 0 ? kind_at(w, i - 1) : TK_NONE;
+
+	if (prev == TK_KW_END)
 		return 0;
-	return matched || starts_unit(kind_at(w, j + 1));
+	switch (k) {
+	case TK_KW_PROCESS:
+	case TK_KW_BLOCK:
+	case TK_KW_RECORD:
+	case TK_KW_UNITS:
+	case TK_KW_PROTECTED:
+	case TK_KW_LOOP:
+		return 1;
+	case TK_KW_COMPONENT:
+		return prev != TK_COLON;
+	case TK_KW_IF:
+	case TK_KW_CASE:
+		w->skip_gen = generate_ahead(w, i);
+		return 1;
+	case TK_KW_ELSIF:
+	case TK_KW_ELSE:
+		w->skip_gen = generate_ahead(w, i);
+		return 0;
+	case TK_KW_GENERATE:
+		return i != w->skip_gen;
+	case TK_KW_FUNCTION:
+	case TK_KW_PROCEDURE:
+		return subprogram_body(w, i);
+	case TK_KW_PACKAGE:
+		if (kind_at(w, i + 1) == TK_KW_BODY)
+			return 1;
+		return kind_at(w, i + 2) == TK_KW_IS &&
+		       kind_at(w, i + 3) != TK_KW_NEW;
+	case TK_KW_FOR:
+		return w->in_config;
+	}
+	return 0;
+}
+
+/* Inside a unit: track depth and notice the unit's end. */
+static void inside_unit(Walk *w, size_t i)
+{
+	if (kind_at(w, i) == TK_KW_END) {
+		if (kind_at(w, i + 1) == TK_KW_FOR && !w->in_config)
+			return;
+		if (w->depth == 0)
+			w->in_unit = 0;
+		else
+			w->depth--;
+		return;
+	}
+	if (opens_block(w, i))
+		w->depth++;
 }
 
 /* Recognize a unit header at code token i. Returns 1 if one was added,
@@ -334,9 +420,6 @@ static int unit_header(Walk *w, size_t i)
 	case TK_KW_ENTITY:      /* entity e is */
 	case TK_KW_CONTEXT:     /* context c is */
 		if (!is_name(kind_at(w, i + 1)) || kind_at(w, i + 2) != TK_KW_IS)
-			return 0;
-		/* "u : entity work.e" never has "is" after the name */
-		if (i > 0 && kind_at(w, i - 1) == TK_COLON)
 			return 0;
 		return add_unit(w, k == TK_KW_ENTITY ? SCAN_ENTITY : SCAN_CONTEXT,
 				i + 1, 0, i) ? -1 : 1;
@@ -373,33 +456,25 @@ static int walk(Walk *w)
 {
 	size_t i = 0;
 
+	w->skip_gen = (size_t)-1;
 	while (i < w->ncode) {
 		uint32_t k = kind_at(w, i);
-		int r;
 
+		if (w->in_unit) {
+			inside_unit(w, i);
+			i++;
+			continue;
+		}
 		if (k == TK_KW_LIBRARY || k == TK_KW_USE ||
 		    (k == TK_KW_CONTEXT && kind_at(w, i + 2) != TK_KW_IS)) {
 			uint32_t kind = k == TK_KW_LIBRARY ? SCAN_LIBRARY :
 					k == TK_KW_USE ? SCAN_USE :
 					SCAN_CONTEXT_REF;
-			/* "use entity work.e" in a configuration is no clause */
-			if (k == TK_KW_USE && !is_name(kind_at(w, i + 1))) {
-				i++;
-				continue;
-			}
 			if (context_item(w, &i, kind))
 				return -1;
 			continue;
 		}
-		if (w->in_unit && k == TK_KW_END && ends_unit(w, i)) {
-			w->in_unit = 0;
-			i++;
-			continue;
-		}
-		/* A unit header is accepted even inside a unit, so a unit
-		 * whose end was not recognized cannot hide the next one. */
-		r = unit_header(w, i);
-		if (r < 0)
+		if (unit_header(w, i) < 0)
 			return -1;
 		i++;
 	}
