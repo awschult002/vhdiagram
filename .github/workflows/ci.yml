@@ -21,7 +21,7 @@ jobs:
       - uses: msys2/setup-msys2@v2
         with:
           msystem: UCRT64
-          install: make git mingw-w64-ucrt-x86_64-gcc
+          install: make git python mingw-w64-ucrt-x86_64-gcc
       - run: make
       - run: make test
       - run: make corpus

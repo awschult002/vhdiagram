@@ -1,0 +1,16 @@
+# Scan fixtures: <file> <status>. Each .vhd lists its expected units in
+# "-- expect: <line> <kind> <name>" comments, including the unit that
+# follows each tricky construct, so a misplaced unit end shows up.
+# The basic forms (instantiation, bindings, generic/nested packages,
+# contexts, physical types, subprogram forms, generates) are covered in
+# tests/scan_test.c; these add cases it does not have.
+#
+# status: pass   - must match exactly
+#         xfail  - KNOWN GAP, expected to fail; CI stays green. If it
+#                  starts passing, the test fails (XPASS) so the mark is
+#                  removed. The text after "xfail" names the gap.
+attribute_spec_subprogram.vhd xfail scan.c gap: subprogram_body() treats "attribute a of f : function|procedure is <value>;" as a body unless <value> is a single name, so depth never returns to 0 and the next unit is missed
+attribute_spec_units.vhd      xfail scan.c gap: opens_block() counts "units" in "attribute a of t : units is 1;" as a units block, so the next unit is missed
+case_generate.vhd             pass
+case_in_process.vhd           pass
+if_generate.vhd               pass

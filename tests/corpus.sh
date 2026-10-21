@@ -1,12 +1,16 @@
 #!/bin/sh
 # Corpus test: tokenize every .vhd/.vhdl file in hdl-modules at a pinned
-# commit and check the invariants in tests/corpus_run.c. The corpus is
-# fetched, not vendored. Usage: sh tests/corpus.sh [corpus_run binary]
+# commit and check the invariants in tests/corpus_run.c, then scan them
+# (tests/scan_dump.c) and compare the unit lists with the independent
+# checker tests/scan_check.py. The corpus is fetched, not vendored.
+# Usage: sh tests/corpus.sh [corpus_run binary] [scan_dump binary]
 set -e
 REPO=https://github.com/hdl-modules/hdl-modules
 PIN=8142d3a1d878651811427e609293946e699c5cb7
 DIR=build/corpus/hdl-modules
 RUN=${1:-build/corpus_run}
+DUMP=${2:-build/scan_dump}
+PY=$(command -v python3 || command -v python)
 
 if [ "$(git -C "$DIR" rev-parse HEAD 2>/dev/null)" != "$PIN" ]; then
 	rm -rf "$DIR"
@@ -20,4 +24,8 @@ if [ "$(git -C "$DIR" rev-parse HEAD 2>/dev/null)" != "$PIN" ]; then
 fi
 test "$(git -C "$DIR" rev-parse HEAD)" = "$PIN"
 find "$DIR" -type f \( -name '*.vhd' -o -name '*.vhdl' \) | LC_ALL=C sort \
-	| "$RUN"
+	> build/corpus/files.txt
+"$RUN" < build/corpus/files.txt
+"$DUMP" < build/corpus/files.txt > build/corpus/scan.tsv
+"$PY" tests/scan_check.py --compare build/corpus/scan.tsv \
+	< build/corpus/files.txt

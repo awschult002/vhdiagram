@@ -40,15 +40,19 @@ build/corpus_run$(X): tests/corpus_run.o $(CORE_LIB)
 	@mkdir -p build
 	$(CC) $(CFLAGS) -o $@ $< $(CORE_LIB) $(LDFLAGS) $(LDLIBS)
 
-corpus: build/corpus_run$(X)
-	sh tests/corpus.sh build/corpus_run$(X)
+build/scan_dump$(X): tests/scan_dump.o $(CORE_LIB)
+	@mkdir -p build
+	$(CC) $(CFLAGS) -o $@ $< $(CORE_LIB) $(LDFLAGS) $(LDLIBS)
+
+corpus: build/corpus_run$(X) build/scan_dump$(X)
+	sh tests/corpus.sh build/corpus_run$(X) build/scan_dump$(X)
 
 clean:
 	rm -rf build
 	rm -f $(EXE) $(APP_OBJ) $(CORE_OBJ) $(TEST_OBJ)
 	rm -f $(APP_OBJ:.o=.d) $(CORE_OBJ:.o=.d) $(TEST_OBJ:.o=.d)
-	rm -f tests/corpus_run.o tests/corpus_run.d
+	rm -f tests/corpus_run.o tests/corpus_run.d tests/scan_dump.o tests/scan_dump.d
 
 -include $(APP_OBJ:.o=.d) $(CORE_OBJ:.o=.d) $(TEST_OBJ:.o=.d)
 .PHONY: all test clean corpus
-.SECONDARY: $(TEST_OBJ) tests/corpus_run.o
+.SECONDARY: $(TEST_OBJ) tests/corpus_run.o tests/scan_dump.o
