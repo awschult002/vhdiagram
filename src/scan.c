@@ -24,8 +24,10 @@
  * Every "end" closes one construct; an "end" at depth 0 ends the unit,
  * whatever follows it (end; end entity; end rtl; ...). Outside a
  * configuration, "end for" (an optional end of a configuration
- * specification) closes nothing. Known gap: the optional "end alt;" of a
- * 2008 generate alternative is not modelled.
+ * specification) closes nothing. Neither does the VHDL-2008 end of a
+ * generate alternative, "end;" or "end alt_label;" followed by "elsif",
+ * "else", "when" or "end generate": the generate it belongs to stays
+ * open until its own "end generate".
  */
 #include "scan.h"
 
@@ -393,11 +395,29 @@ static int opens_block(Walk *w, size_t i)
 	return 0;
 }
 
+/* At an "end": is it "end [label] ;" closing a generate alternative,
+ * i.e. followed by the next alternative or by "end generate"? */
+static int ends_alternative(const Walk *w, size_t i)
+{
+	size_t j = i + 1;
+	uint32_t k;
+
+	if (is_name(kind_at(w, j)))
+		j++;
+	if (kind_at(w, j) != TK_SEMI)
+		return 0;
+	k = kind_at(w, j + 1);
+	return k == TK_KW_ELSIF || k == TK_KW_ELSE || k == TK_KW_WHEN ||
+	       (k == TK_KW_END && kind_at(w, j + 2) == TK_KW_GENERATE);
+}
+
 /* Inside a unit: track depth and notice the unit's end. */
 static void inside_unit(Walk *w, size_t i)
 {
 	if (kind_at(w, i) == TK_KW_END) {
 		if (kind_at(w, i + 1) == TK_KW_FOR && !w->in_config)
+			return;
+		if (ends_alternative(w, i))
 			return;
 		if (w->depth == 0)
 			w->in_unit = 0;

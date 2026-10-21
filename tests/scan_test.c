@@ -515,6 +515,145 @@ static void test_nested_package(void)
 		"entity last is end;\n", e, 3);
 }
 
+static void test_context_ref_and_decl(void)
+{
+	static const ExpUnit e[] = {
+		{ SCAN_CONTEXT, "ctx", NULL, 1 },
+		{ SCAN_ENTITY, "user", NULL, 7 },
+		{ SCAN_ARCHITECTURE, "rtl", "user", 9 },
+	};
+	check_units("context reference vs declaration",
+		"context ctx is\n"
+		"  library ieee;\n"
+		"  use ieee.std_logic_1164.all;\n"
+		"  context ieee.ieee_std_context;\n"
+		"end context;\n"
+		"library work; context work.ctx;\n"
+		"entity user is end entity;\n"
+		"context work.ctx;\n"
+		"architecture rtl of user is begin end;\n", e, 3);
+}
+
+static void test_physical_type(void)
+{
+	static const ExpUnit e[] = {
+		{ SCAN_PACKAGE, "phys_pkg", NULL, 1 },
+		{ SCAN_ENTITY, "after_it", NULL, 9 },
+	};
+	check_units("physical type in a package",
+		"package phys_pkg is\n"
+		"  type t is range 0 to 1e6\n"
+		"    units\n"
+		"      fs;\n"
+		"      ps = 1000 fs;\n"
+		"    end units;\n"
+		"  constant c : t := 3 ps;\n"
+		"end package phys_pkg;\n"
+		"entity after_it is end;\n", e, 2);
+}
+
+static void test_subprogram_forms(void)
+{
+	static const ExpUnit e[] = {
+		{ SCAN_PACKAGE, "sub_pkg", NULL, 1 },
+		{ SCAN_PACKAGE_BODY, "sub_pkg", "sub_pkg", 6 },
+		{ SCAN_ENTITY, "after_it", NULL, 16 },
+	};
+	check_units("subprogram declaration, instantiation and body",
+		"package sub_pkg is\n"
+		"  function f(a: bit) return bit;\n"
+		"  procedure p is new work.gp generic map (t => bit);\n"
+		"  impure function h return bit;\n"
+		"end package;\n"
+		"package body sub_pkg is\n"
+		"  function f(a: bit) return bit is\n"
+		"    variable v : bit;\n"
+		"  begin\n"
+		"    if a = '1' then v := '0'; else v := '1'; end if;\n"
+		"    return v;\n"
+		"  end function;\n"
+		"  procedure p2 is new work.gp generic map (t => bit);\n"
+		"  impure function h return bit is begin return '0'; end h;\n"
+		"end package body;\n"
+		"entity after_it is end;\n", e, 3);
+}
+
+static void test_generates_and_loops(void)
+{
+	static const ExpUnit e[] = {
+		{ SCAN_ARCHITECTURE, "rtl", "e", 1 },
+		{ SCAN_ENTITY, "after_it", NULL, 36 },
+	};
+	check_units("generates, nested loops, if and case",
+		"architecture rtl of e is\n"
+		"begin\n"
+		"  g1 : if W = 8 generate\n"
+		"    s <= '1';\n"
+		"  elsif W = 16 generate\n"
+		"    s <= '0';\n"
+		"  else generate\n"
+		"    s <= 'Z';\n"
+		"  end generate g1;\n"
+		"  g2 : for i in 0 to 3 generate\n"
+		"    t(i) <= s;\n"
+		"  end generate;\n"
+		"  p : process (clk)\n"
+		"    variable n : integer;\n"
+		"  begin\n"
+		"    for j in 0 to 1 loop\n"
+		"      for i in 0 to 3 loop\n"
+		"        n := n + 1;\n"
+		"      end loop;\n"
+		"    end loop;\n"
+		"    if n = 0 then\n"
+		"      null;\n"
+		"    elsif n = 1 then\n"
+		"      null;\n"
+		"    else\n"
+		"      null;\n"
+		"    end if;\n"
+		"    case n is\n"
+		"      when 0 => null;\n"
+		"      when others => null;\n"
+		"    end case;\n"
+		"  end process p;\n"
+		"  g3 : case W generate when 8 => s <= '1'; end generate;\n"
+		"  g4 : if a1: W = 8 generate begin end a1; else a2: generate end; end generate;\n"
+		"end architecture;\n"
+		"entity after_it is end;\n", e, 2);
+}
+
+static void test_generate_alternative_ends(void)
+{
+	static const ExpUnit e[] = {
+		{ SCAN_ARCHITECTURE, "rtl", "e", 1 },
+		{ SCAN_PACKAGE_BODY, "pb", "pb", 18 },
+		{ SCAN_ENTITY, "after_it", NULL, 21 },
+	};
+	check_units("VHDL-2008 end of generate alternatives",
+		"architecture rtl of e is\n"
+		"begin\n"
+		"  g1 : if a1: W = 8 generate\n"
+		"    signal x : bit;\n"
+		"  begin\n"
+		"    x <= '1';\n"
+		"  end a1;\n"
+		"  elsif a2: W = 16 generate\n"
+		"  end;\n"
+		"  else a3: generate end a3;\n"
+		"  end generate g1;\n"
+		"  g2 : case W generate\n"
+		"    when c8: 8 => s <= '1'; end c8;\n"
+		"    when others => end;\n"
+		"  end generate;\n"
+		"  b : block is package inner is end package; begin end block;\n"
+		"end architecture;\n"
+		"package body pb is\n"
+		"  function f return bit is begin return '0'; end f;\n"
+		"end;\n"
+		"entity after_it is end;\n", e, 3);
+}
+
 static void test_missing_file(void)
 {
 	ScanResult sr;
@@ -542,6 +681,11 @@ int main(void)
 	test_configuration_bindings();
 	test_generic_packages();
 	test_nested_package();
+	test_context_ref_and_decl();
+	test_physical_type();
+	test_subprogram_forms();
+	test_generates_and_loops();
+	test_generate_alternative_ends();
 	test_missing_file();
 	printf("scan_test: %d/%d passed\n", ntests - nfail, ntests);
 	return nfail ? 1 : 0;
