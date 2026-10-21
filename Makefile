@@ -35,11 +35,20 @@ test: $(EXE) $(TEST_BIN)
 	@for t in $(TEST_BIN); do echo "== $$t"; ./$$t || exit 1; done
 	sh tests/smoke.sh
 
+# Corpus run over hdl-modules (needs git + network); see tests/corpus.sh.
+build/corpus_run$(X): tests/corpus_run.o $(CORE_LIB)
+	@mkdir -p build
+	$(CC) $(CFLAGS) -o $@ $< $(CORE_LIB) $(LDFLAGS) $(LDLIBS)
+
+corpus: build/corpus_run$(X)
+	sh tests/corpus.sh build/corpus_run$(X)
+
 clean:
 	rm -rf build
 	rm -f $(EXE) $(APP_OBJ) $(CORE_OBJ) $(TEST_OBJ)
 	rm -f $(APP_OBJ:.o=.d) $(CORE_OBJ:.o=.d) $(TEST_OBJ:.o=.d)
+	rm -f tests/corpus_run.o tests/corpus_run.d
 
 -include $(APP_OBJ:.o=.d) $(CORE_OBJ:.o=.d) $(TEST_OBJ:.o=.d)
-.PHONY: all test clean
-.SECONDARY: $(TEST_OBJ)
+.PHONY: all test clean corpus
+.SECONDARY: $(TEST_OBJ) tests/corpus_run.o
