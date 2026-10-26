@@ -47,6 +47,16 @@ build/scan_dump$(X): tests/scan_dump.o $(CORE_LIB)
 corpus: build/corpus_run$(X) build/scan_dump$(X)
 	sh tests/corpus.sh build/corpus_run$(X) build/scan_dump$(X)
 
+# Sanitizer run: test + corpus under ASan/UBSan in a separate tree (build/san).
+SAN := -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=all
+san:
+	@mkdir -p build/san/src
+	cp -R Makefile tests build/san/ && cp src/*.[ch] build/san/src/
+	rm -f build/san/tests/*.[od]
+	ASAN_OPTIONS=detect_leaks=1:abort_on_error=1 \
+	UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1 \
+	$(MAKE) -C build/san CFLAGS="$(SAN)" LDFLAGS="$(SAN)" test corpus
+
 clean:
 	rm -rf build
 	rm -f $(EXE) $(APP_OBJ) $(CORE_OBJ) $(TEST_OBJ)
@@ -54,5 +64,5 @@ clean:
 	rm -f tests/corpus_run.o tests/corpus_run.d tests/scan_dump.o tests/scan_dump.d
 
 -include $(APP_OBJ:.o=.d) $(CORE_OBJ:.o=.d) $(TEST_OBJ:.o=.d)
-.PHONY: all test clean corpus
+.PHONY: all test clean corpus san
 .SECONDARY: $(TEST_OBJ) tests/corpus_run.o tests/scan_dump.o
